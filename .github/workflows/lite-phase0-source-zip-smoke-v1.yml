@@ -19,7 +19,7 @@ concurrency:
 jobs:
   source-zip-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       SOURCE_BLOB: 17bc0b4eeb2dfa74bca525e2a173f9deafdea5e6
       SOURCE_SHA256: 6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177
@@ -358,7 +358,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Compile, deploy and qualify V21 measured MEV arithmetic-only cleanup and boundary qualification on an isolated Base fork
+      - name: Compile, deploy and qualify V21 retained scoped checks plus expanded accounting qualification on an isolated Base fork
         id: compile
         env:
           PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
@@ -471,14 +471,79 @@ jobs:
           const addr=n=>r.deployments[n].address;
           for(const d of Object.values(r.deployments)) assert.ok((await pub.getCode({address:d.address})).length>2);
           const dao=r.dao, router=addr('Router'), factory=addr('WeightedPoolFactory'), vault=addr('Vault'), volume=addr('CurveYieldVolumeFeeController'), infra=addr('CurveYieldHookInfrastructure');
-          const read=(address,abi,functionName,args=[])=>pub.readContract({address,abi,functionName,args});
+          const read=async(address,abi,functionName,args=[])=>{const result=await pub.readContract({address,abi,functionName,args});record(coverageLedger,{kind:'read',address,functionName,args,result});return result;};
           const receipts=[];
+          
+          // Full-campaign state ledger, including the retained scoped qualification.
+          const campaignLedger=process.env.GITHUB_WORKSPACE+'/.source-zip-smoke/action-ledger.ndjson';
+          const coverageLedger=process.env.GITHUB_WORKSPACE+'/.source-zip-smoke/selector-ledger.ndjson';
+          const json=(v)=>JSON.stringify(v,(_,x)=>typeof x==='bigint'?x.toString():x);
+          const record=(file,obj)=>fs.appendFileSync(file,json(obj)+'\n');
+          const watchedTokens=new Map([[r.weth.toLowerCase(),r.weth],['0x833589fcd6edb6e08f4c7c32d4f71b54bda02913','0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913']]);
+          const watchedAccounts=new Map();
+          const watchedPools=new Map();
+          const controlledTokens=new Set();
+          const watchAccount=a=>{if(a)watchedAccounts.set(a.toLowerCase(),a);};
+          const watchToken=(a,controlled=false)=>{watchedTokens.set(a.toLowerCase(),a);if(controlled)controlledTokens.add(a.toLowerCase());};
+          for(const a of [account.address,dao,vault,router,addr('BatchRouter'),addr('CompositeLiquidityRouter'),infra,addr('ProtocolFeeController'),zeroAddress,'0x000000000000000000000000000000000000dEaD'])watchAccount(a);
+          const ercState=parseAbi(['function balanceOf(address) view returns (uint256)','function totalSupply() view returns (uint256)']);
+          const vaultState=parseAbi(['function getPoolTokenInfo(address) view returns (address[],(uint8 tokenType,address rateProvider,bool paysYieldFees)[],uint256[],uint256[])','function getReservesOf(address) view returns (uint256)','function getAggregateSwapFeeAmount(address,address) view returns (uint256)','function getAggregateYieldFeeAmount(address,address) view returns (uint256)','function getNonzeroDeltaCount() view returns (uint256)','function isUnlocked() view returns (bool)']);
+          const mc='0xcA11bde05977b3631167028862bE2a173976CA11';
+          assert.ok((await pub.getCode({address:mc})).length>2,'Base multicall missing');
+          let fullCampaignV1=false,qualifying=false,actionCount=0,lastAction;
+          const stateCall=(address,abi,functionName,args=[])=>({address,abi,functionName,args});
+          async function stateSnapshot(){
+            const ts=[...watchedTokens.values()],as=[...watchedAccounts.values()],ps=[...watchedPools.values()];
+            const calls=[];
+            for(const t of ts){
+              calls.push(stateCall(t,ercState,'totalSupply'));
+              for(const a of as)calls.push(stateCall(t,ercState,'balanceOf',[a]));
+              calls.push(stateCall(vault,vaultState,'getReservesOf',[t]));
+            }
+            for(const p of ps){
+              calls.push(stateCall(vault,vaultState,'getPoolTokenInfo',[p.address]));
+              for(const t of p.tokens){
+                calls.push(stateCall(vault,vaultState,'getAggregateSwapFeeAmount',[p.address,t]));
+                calls.push(stateCall(vault,vaultState,'getAggregateYieldFeeAmount',[p.address,t]));
+              }
+            }
+            calls.push(stateCall(vault,vaultState,'getNonzeroDeltaCount'),stateCall(vault,vaultState,'isUnlocked'));
+            const block=await pub.getBlockNumber({cacheTime:0});
+            const data=await pub.multicall({contracts:calls,multicallAddress:mc,allowFailure:false,batchSize:0,blockNumber:block});
+            let j=0;const tokens={},poolStates={};
+            for(const t of ts){const supply=data[j++],balances={};for(const a of as)balances[a.toLowerCase()]=data[j++];const reserve=data[j++];tokens[t.toLowerCase()]={supply,balances,reserve};}
+            for(const p of ps){const [tokens0,info,raw,scaled]=data[j++];const aggregate={};for(const t of p.tokens)aggregate[t.toLowerCase()]=[data[j++],data[j++]];poolStates[p.address.toLowerCase()]={tokens:tokens0,info,raw,scaled,aggregate};}
+            assert.equal(data[j++],0n,'Vault has nonzero unsettled deltas after transaction');
+            assert.equal(data[j++],false,'Vault remains unlocked outside transaction');
+            return {block,tokens,pools:poolStates};
+          }
+          function assertConservation(before,after){
+            for(const t of controlledTokens){
+              if(!before.tokens[t]||!after.tokens[t])continue;
+              const b=before.tokens[t],a=after.tokens[t];
+              const total=x=>Object.values(x.balances).reduce((s,v)=>s+v,0n);
+              assert.equal(total(a)-total(b),a.supply-b.supply,'Controlled token supply/balance reconciliation: '+t);
+            }
+          }
+          function deltaOf(action,t,a){const k=t.toLowerCase(),u=a.toLowerCase();return action.after.tokens[k].balances[u]-action.before.tokens[k].balances[u];}
+          
           async function send(w,address,abi,functionName,args=[],value=0n) {
+            const actor=typeof w.account==='string'?w.account:w.account.address;
+            watchAccount(actor);
+            const before=await stateSnapshot();
             const s=await pub.simulateContract({account:w.account,address,abi,functionName,args,value});
             const hash=await w.writeContract(s.request);
             const receipt=await pub.waitForTransactionReceipt({hash});
             assert.equal(receipt.status,'success');
-            receipts.push({functionName,hash,gasUsed:receipt.gasUsed.toString()});
+            if(functionName==='create' && typeof s.result==='string' && /^0x[0-9a-f]{40}$/i.test(s.result)){watchToken(s.result);watchAccount(s.result);}
+            if(functionName==='initialize' && Array.isArray(args[1]))watchedPools.set(args[0].toLowerCase(),{address:args[0],tokens:args[1]});
+            const after=await stateSnapshot();
+            lastAction={phase:fullCampaignV1?'full':'retained-scoped',qualifying,actor,address,functionName,args,hash,gasUsed:receipt.gasUsed,blockNumber:receipt.blockNumber,before,after,logs:receipt.logs.map(l=>({address:l.address,topics:l.topics,data:l.data}))};
+            record(campaignLedger,lastAction);
+            assertConservation(before,after);
+            if(qualifying){actionCount++;if(actionCount%25===0)console.log('Qualifying actions completed: '+actionCount);}
+            receipts.push({functionName,hash,gasUsed:receipt.gasUsed.toString(),qualifying});
+            record(coverageLedger,{kind:'transaction',address,functionName,hash,qualifying});
             return s.result;
           }
           async function impersonate(address) {
@@ -687,8 +752,247 @@ jobs:
             if(!combined) await send(wallet,hook,hookAbi,'setVolumeDisabled',[pool,true]);
             scenarios.push({name,pool,quotes,taxed,exempt,overflowQuote,maxStaticQuote,extremeThresholdQuote,zeroCapQuote,zeroSurchargeBefore,zeroSurchargeAfter,afterState,reenabledState,disabledActivityUnchanged:true,liquidityFeesReceived:afterLiquidity.map((v,i)=>v-beforeFees[i]),swapTransferFeesReceived:afterSwaps.map((v,i)=>v-afterLiquidity[i]),proportionalAddRemove:true,donationGate:true,unbalancedRejected:true});
           }
+          
+          // Expanded functional campaign. Test fixtures are fork-only and are not production contracts.
+          fullCampaignV1=true;
+          const {default:solc}=await import('solc');
+          const {randomBytes}=await import('node:crypto');
+          const {decodeEventLog}=await import('viem');
+          const fixtureSource=[
+          '// SPDX-License-Identifier: MIT',
+          'pragma solidity ^0.8.24;',
+          'import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";',
+          'import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";',
+          'import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";',
+          'import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";',
+          'import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";',
+          'contract ForkToken is ERC20 {',
+          '  address public immutable owner; address public immutable feeSink; uint256 public immutable taxBps;',
+          '  mapping(address=>bool) public exempt;',
+          '  constructor(string memory n,string memory s,uint256 b,address sink) ERC20(n,s) {owner=msg.sender;feeSink=sink;taxBps=b;_mint(msg.sender,100000000e18);}',
+          '  function setExempt(address a,bool e) external {require(msg.sender==owner);exempt[a]=e;}',
+          '  function burn(uint256 amount) external {_burn(msg.sender,amount);}',
+          '  function _update(address from,address to,uint256 amount) internal override {if(from!=address(0)&&to!=address(0)&&!exempt[from]&&!exempt[to]&&taxBps!=0){uint256 f=amount*taxBps/10000; if(f!=0){super._update(from,feeSink,f);amount-=f;}}super._update(from,to,amount);}',
+          '}',
+          'contract ForkFeeVault is ERC4626 {',
+          '  using SafeERC20 for IERC20; uint256 public immutable depositBps; uint256 public immutable withdrawalBps; address public immutable feeSink;',
+          '  constructor(IERC20 a,string memory n,string memory s,uint256 d,uint256 w,address sink) ERC20(n,s) ERC4626(a){depositBps=d;withdrawalBps=w;feeSink=sink;}',
+          '  function feeOnRaw(uint256 a,uint256 b) internal pure returns(uint256){return Math.mulDiv(a,b,10000,Math.Rounding.Ceil);}',
+          '  function feeOnTotal(uint256 a,uint256 b) internal pure returns(uint256){return Math.mulDiv(a,b,10000+b,Math.Rounding.Ceil);}',
+          '  function previewDeposit(uint256 a) public view override returns(uint256){return super.previewDeposit(a-feeOnTotal(a,depositBps));}',
+          '  function previewMint(uint256 s) public view override returns(uint256){uint256 a=super.previewMint(s);return a+feeOnRaw(a,depositBps);}',
+          '  function previewWithdraw(uint256 a) public view override returns(uint256){return super.previewWithdraw(a+feeOnRaw(a,withdrawalBps));}',
+          '  function previewRedeem(uint256 s) public view override returns(uint256){uint256 a=super.previewRedeem(s);return a-feeOnTotal(a,withdrawalBps);}',
+          '  function _deposit(address c,address r,uint256 a,uint256 s) internal override {super._deposit(c,r,a,s);uint256 f=feeOnTotal(a,depositBps);if(f!=0)IERC20(asset()).safeTransfer(feeSink,f);}',
+          '  function _withdraw(address c,address r,address o,uint256 a,uint256 s) internal override {super._withdraw(c,r,o,a,s);uint256 f=feeOnRaw(a,withdrawalBps);if(f!=0)IERC20(asset()).safeTransfer(feeSink,f);}',
+          '  function getRate() external view returns(uint256){return convertToAssets(1e18);}',
+          '}'
+          ].join('\n');
+          const fixtureCompilation=JSON.parse(solc.compile(JSON.stringify({language:'Solidity',sources:{'ForkFixtures.sol':{content:fixtureSource}},settings:{evmVersion:'cancun',optimizer:{enabled:true,runs:200},outputSelection:{'*':{'*':['abi','evm.bytecode.object']}}}}),{import:p=>{try{return {contents:fs.readFileSync('node_modules/'+p,'utf8')};}catch{return {error:'Fixture import not found '+p};}}}));
+          assert.deepEqual((fixtureCompilation.errors||[]).filter(e=>e.severity==='error'),[]);
+          const fixtures=fixtureCompilation.contracts['ForkFixtures.sol'];
+          const fixtureDeployments=[];
+          async function fixtureDeploy(name,args){
+            const a=fixtures[name];const h=await wallet.deployContract({abi:a.abi,bytecode:'0x'+a.evm.bytecode.object,args});
+            const rx=await pub.waitForTransactionReceipt({hash:h});assert.equal(rx.status,'success');assert.ok(rx.contractAddress);
+            watchToken(rx.contractAddress,true);watchAccount(rx.contractAddress);
+            fixtureDeployments.push({name,address:rx.contractAddress,hash:h,gasUsed:rx.gasUsed});
+            return rx.contractAddress;
+          }
+          const actor2=privateKeyToAccount('0x'+randomBytes(32).toString('hex'));
+          const wallet2=createWalletClient({account:actor2,chain,transport});
+          await pub.request({method:'anvil_setBalance',params:[actor2.address,'0x3635c9adc5dea00000']});
+          watchAccount(actor2.address);
+          const feeSink=privateKeyToAccount('0x'+randomBytes(32).toString('hex')).address;
+          watchAccount(feeSink);
+          const A=await fixtureDeploy('ForkToken',['Plain A','PLNA',0n,feeSink]);
+          const B=await fixtureDeploy('ForkToken',['Plain B','PLNB',0n,feeSink]);
+          const T=await fixtureDeploy('ForkToken',['Tax token','TAX',75n,feeSink]);
+          const F=await fixtureDeploy('ForkFeeVault',[A,'Fee-free vault','VFREE',0n,0n,feeSink]);
+          const D=await fixtureDeploy('ForkFeeVault',[A,'Deposit-fee vault','VDEP',40n,0n,feeSink]);
+          const X=await fixtureDeploy('ForkFeeVault',[A,'Withdrawal-fee vault','VWD',0n,60n,feeSink]);
+          const Z=await fixtureDeploy('ForkFeeVault',[A,'Both-fee vault','VBOTH',40n,60n,feeSink]);
+          const fixtureTokens=[A,B,T,F,D,X,Z], shareTokens=[F,D,X,Z];
+          const ft=fixtures.ForkToken.abi,fv=fixtures.ForkFeeVault.abi;
+          const batch=addr('BatchRouter'),composite=addr('CompositeLiquidityRouter'),stableFactory=addr('StablePoolFactory'),reFactory=addr('ReClammPoolFactory'),surge=addr('CurveYieldStableSurgeVolumeHookV14'),pc=addr('ProtocolFeeController');
+          const role={pauseManager:account.address,swapFeeManager:account.address,poolCreator:account.address};
+          const stableCreate=parseAbi(['function create(string,string,(address token,uint8 tokenType,address rateProvider,bool paysYieldFees)[],uint256,(address pauseManager,address swapFeeManager,address poolCreator),uint256,address,bool,bool,bytes32) returns (address)']);
+          const rcCreate=parseAbi(['function create(string,string,(address token,uint8 tokenType,address rateProvider,bool paysYieldFees)[],(address pauseManager,address swapFeeManager,address poolCreator),uint256,(uint256 initialMinPrice,uint256 initialMaxPrice,uint256 initialTargetPrice,bool tokenAPriceIncludesRate,bool tokenBPriceIncludesRate),uint256,uint256,bytes32) returns (address)']);
+          const rcAbi=parseAbi(['function computeInitialBalancesRaw(address,uint256) view returns (uint256[])','function setCenterednessMargin(uint256)','function setDailyPriceShiftExponent(uint256) returns (uint256)','function computeCurrentPriceRange() view returns (uint256,uint256)','function computeCurrentVirtualBalances() view returns (uint256,uint256,bool)','function computeCurrentPoolCenteredness() view returns (uint256,bool)','function getLastTimestamp() view returns (uint32)']);
+          const surgeAbi=parseAbi(['function setVolumeDisabled(address,bool)','function volumeDisabled(address) view returns (bool)','function getMaxSurgeFeePercentage(address) view returns (uint256)','function getSurgeThresholdPercentage(address) view returns (uint256)','function setMaxSurgeFeePercentage(address,uint256)','function setSurgeThresholdPercentage(address,uint256)']);
+          const addRoute=parseAbi(['function addLiquidityUnbalanced(address,uint256[],uint256,bool,bytes) payable returns (uint256)','function addLiquiditySingleTokenExactOut(address,address,uint256,uint256,bool,bytes) payable returns (uint256)','function removeLiquiditySingleTokenExactIn(address,uint256,address,uint256,bool,bytes) payable returns (uint256)','function removeLiquiditySingleTokenExactOut(address,uint256,address,uint256,bool,bytes) payable returns (uint256)','function querySwapSingleTokenExactIn(address,address,address,uint256,address,bytes) returns (uint256)','function querySwapSingleTokenExactOut(address,address,address,uint256,address,bytes) returns (uint256)','function queryAddLiquidityProportional(address,uint256,address,bytes) returns (uint256[])','function queryRemoveLiquidityProportional(address,uint256,address,bytes) returns (uint256[])']);
+          const batchAbi=parseAbi(['function swapExactIn((address tokenIn,(address pool,address tokenOut,bool isBuffer)[] steps,uint256 exactAmountIn,uint256 minAmountOut)[] paths,uint256 deadline,bool wethIsEth,bytes userData) payable returns (uint256[],address[],uint256[])','function swapExactOut((address tokenIn,(address pool,address tokenOut,bool isBuffer)[] steps,uint256 maxAmountIn,uint256 exactAmountOut)[] paths,uint256 deadline,bool wethIsEth,bytes userData) payable returns (uint256[],address[],uint256[])','function querySwapExactIn((address tokenIn,(address pool,address tokenOut,bool isBuffer)[] steps,uint256 exactAmountIn,uint256 minAmountOut)[] paths,address sender,bytes userData) returns (uint256[],address[],uint256[])','function querySwapExactOut((address tokenIn,(address pool,address tokenOut,bool isBuffer)[] steps,uint256 maxAmountIn,uint256 exactAmountOut)[] paths,address sender,bytes userData) returns (uint256[],address[],uint256[])']);
+          const pcAbi=parseAbi(['function collectAggregateFees(address)','function setPoolCreatorSwapFeePercentage(address,uint256)','function setPoolCreatorYieldFeePercentage(address,uint256)','function withdrawPoolCreatorFees(address,address)','function withdrawProtocolFees(address,address)','function getProtocolFeeAmounts(address) view returns (uint256[])','function getPoolCreatorFeeAmounts(address) view returns (uint256[])']);
+          const iabi=parseAbi(['function observe(address)','function tokenPolicy(address) view returns (uint16,uint16,uint16,uint16)','function feeRecipient() view returns (address)','function normalizedWeight(address,uint256) view returns (uint64)','function isObservationWarm(address) view returns (bool)','function getTimeWeightedBalancesPerBpt(address,uint32) view returns (uint256[])']);
+          const feeEvent=parseAbi(['event FeesCollected(address indexed pool,address indexed token,uint256 vaultFee,uint256 burned)']);
+          const supplyAbi=parseAbi(['function totalSupply() view returns (uint256)']);
+          const fullPools=[];
+          const unit=10n**18n;
+          async function tx(w,a,abi,fn,args=[],verify){
+            qualifying=true;
+            try{
+              const result=await send(w,a,abi,fn,args);
+              if(verify)verify(lastAction,result);
+              const fees={};for(const l of lastAction.logs){
+                if(l.address.toLowerCase()!==infra.toLowerCase())continue;
+                try{const e=decodeEventLog({abi:feeEvent,data:l.data,topics:l.topics});const t=e.args.token.toLowerCase();const f=fees[t]??[0n,0n];f[0]+=e.args.vaultFee;f[1]+=e.args.burned;fees[t]=f;}catch{}
+              }
+              if(lastAction.actor.toLowerCase()!==dao.toLowerCase())for(const [t,[fee,burn]] of Object.entries(fees)){
+                assert.equal(deltaOf(lastAction,t,dao),fee,'Fee recipient balance delta');
+                assert.equal(lastAction.after.tokens[t].supply-lastAction.before.tokens[t].supply,-burn,'Hook burn supply delta');
+              }
+              return result;
+            }finally{qualifying=false;}
+          }
+          async function sim(w,address,abi,functionName,args=[]){
+            const r0=await pub.simulateContract({account:w.account,address,abi,functionName,args});
+            record(coverageLedger,{kind:'simulation',address,functionName,args,result:r0.result});return r0.result;
+          }
+          const actorOf=w=>w.account.address;
+          const expiry2=Number((await pub.getBlock()).timestamp)+86400*30;
+          await send(wallet,T,ft,'setExempt',[vault,true]);
+          assert.equal(await read(T,ft,'exempt',[vault]),true);
+          await send(daoWallet,infra,tax,'setTokenPolicy',[T,{depositBps:25,withdrawalBps:35,burnBps:20,transferFeeBps:50}]);
+          assert.deepEqual(await read(infra,iabi,'tokenPolicy',[T]),[25,35,20,50]);
+          for(const t of [A,B,T])await send(wallet,t,ft,'transfer',[actor2.address,2000000n*unit]);
+          for(const w of [wallet,wallet2]){
+            for(const v of shareTokens){
+              await send(w,A,ft,'approve',[v,maxUint256]);
+              await send(w,v,fv,'deposit',[200000n*unit,actorOf(w)]);
+            }
+            for(const t of fixtureTokens){
+              await send(w,t,token,'approve',[r.permit2,maxUint256]);
+              for(const rt of [router,batch,composite])await send(w,r.permit2,permit,'approve',[t,rt,(1n<<160n)-1n,expiry2]);
+            }
+          }
+          const configOf=t=>({token:t,tokenType:shareTokens.includes(t)?1:0,rateProvider:shareTokens.includes(t)?t:zeroAddress,paysYieldFees:shareTokens.includes(t)});
+          const sortTokens=ts=>[...ts].sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
+          async function newPool(name,type,ts,hookAddress,disabled=false,weights=null){
+            const sorted=sortTokens(ts),cfg=sorted.map(configOf),salt='0x'+(100+fullPools.length).toString(16).padStart(64,'0');
+            const base=['Full '+name,'FULL'+fullPools.length,cfg];
+            let p;
+            if(type==='weighted')p=await send(wallet,factory,create,'create',[...base,weights||sorted.map(()=>unit/BigInt(sorted.length)),role,unit/1000n,hookAddress,true,hookAddress!==zeroAddress,salt]);
+            else if(type==='stable')p=await send(wallet,stableFactory,stableCreate,'create',[...base,200n,role,unit/1000n,hookAddress,true,hookAddress!==zeroAddress,salt]);
+            else p=await send(wallet,reFactory,rcCreate,'create',[...base,role,unit/1000n,{initialMinPrice:unit/2n,initialMaxPrice:2n*unit,initialTargetPrice:unit,tokenAPriceIncludesRate:false,tokenBPriceIncludesRate:false},unit/10n,unit/5n,salt]);
+            if(hookAddress===hook)await send(wallet,hook,hookAbi,'setPoolMevTaxThreshold',[p,1000n*threshold]);
+            if(hookAddress===hook||hookAddress===surge){
+              await send(wallet,volume,vol,'setPoolVolumeFeeConfig',[p,unit/100n,20,8]);
+              await send(wallet,hookAddress,hookAddress===hook?hookAbi:surgeAbi,'setVolumeDisabled',[p,disabled]);
+            }
+            const seed=type==='reclamm'?await read(p,rcAbi,'computeInitialBalancesRaw',[sorted[0],10000n*unit]):sorted.map(()=>10000n*unit);
+            await send(wallet,router,route,'initialize',[p,sorted,seed,1n,false,'0x']);
+            for(const w of [wallet,wallet2])for(const rt of [router,composite,batch])await send(w,p,token,'approve',[rt,maxUint256]);
+            await send(wallet,pc,pcAbi,'setPoolCreatorSwapFeePercentage',[p,unit/20n]);
+            await send(wallet,pc,pcAbi,'setPoolCreatorYieldFeePercentage',[p,unit/20n]);
+            const rec={name,type,address:p,tokens:sorted,hook:hookAddress,disabled};fullPools.push(rec);return p;
+          }
+          const P0=await newPool('weighted fee-free shares','weighted',[A,F],zeroAddress);
+          const P1=await newPool('weighted tax / MEV-volume','weighted',[A,T],hook,false,[unit*8n/10n,unit*2n/10n]);
+          const P2=await newPool('stable surge-volume / free shares','stable',[A,F],surge,false);
+          const P3=await newPool('stable pure surge / fee shares','stable',[A,Z],surge,true);
+          const P4=await newPool('stable three-token fee shares','stable',[A,D,X],zeroAddress);
+          const P5=await newPool('reCLAMM plain assets','reclamm',[A,B],zeroAddress);
+          const P6=await newPool('weighted both-fee shares','weighted',[B,Z],hook,true);
+          const P7=await newPool('weighted exempt native-tax token','weighted',[B,T],zeroAddress);
+          assert.equal(fullPools.length,8);
+          record(campaignLedger,{kind:'fixture-manifest',fixtureDeployments,fullPools,actors:[account.address,actor2.address],feeSink});
+          const actorList=[wallet,wallet2];
+          const step=(pool,tokenOut)=>({pool,tokenOut,isBuffer:false});
+          const exactInPath=(tokenIn,steps,amt)=>({tokenIn,steps,exactAmountIn:amt,minAmountOut:1n});
+          const exactOutPath=(tokenIn,steps,amt)=>({tokenIn,steps,maxAmountIn:1000n*unit,exactAmountOut:amt});
+          async function singleSwap(w,p,ti,to,amount,kind){
+            const who=actorOf(w),dl=(await pub.getBlock()).timestamp+3600n;
+            const fn=kind===0?'swapSingleTokenExactIn':'swapSingleTokenExactOut';
+            const params0=kind===0?[p,ti,to,amount,1n,dl,false,'0x']:[p,ti,to,amount,1000n*unit,dl,false,'0x'];
+            await tx(w,router,route,fn,params0,a=>{
+              const di=deltaOf(a,ti,who),dout=deltaOf(a,to,who);
+              assert.ok(di<0n&&dout>0n,'Swap must debit input and credit output');
+              if(kind===0)assert.equal(-di,amount,'Exact-in debit');
+              else{assert.equal(dout,amount,'Exact-out credit');assert.ok(-di<=1000n*unit);}
+            });
+          }
+          async function joinExit(w,p,amount){
+            const who=actorOf(w),n=p.tokens.length;
+            await tx(w,router,route,'addLiquidityProportional',[p.address,Array(n).fill(1000n*unit),amount,false,'0x'],a=>assert.equal(deltaOf(a,p.address,who),amount));
+            await tx(w,router,route,'removeLiquidityProportional',[p.address,amount/2n,Array(n).fill(0n),false,'0x'],a=>assert.equal(deltaOf(a,p.address,who),-amount/2n));
+          }
+          async function vaultLifecycle(w,v,amt){
+            const who=actorOf(w);
+            await tx(w,v,fv,'deposit',[amt,who],a=>{assert.equal(deltaOf(a,A,who),-amt);assert.ok(deltaOf(a,v,who)>0n);});
+            await tx(w,v,fv,'mint',[amt/2n,who],a=>{assert.equal(deltaOf(a,v,who),amt/2n);assert.ok(deltaOf(a,A,who)<0n);});
+            await tx(w,v,fv,'withdraw',[amt/3n,who,who],a=>{assert.equal(deltaOf(a,A,who),amt/3n);assert.ok(deltaOf(a,v,who)<0n);});
+            await tx(w,v,fv,'redeem',[amt/4n,who,who],a=>{assert.equal(deltaOf(a,v,who),-amt/4n);assert.ok(deltaOf(a,A,who)>0n);});
+          }
+          for(let cycle=0;cycle<12;cycle++){
+            const w=actorList[cycle%2],who=actorOf(w),amount=BigInt(1+(cycle*7)%19)*unit;
+            const dl=(await pub.getBlock()).timestamp+3600n;
+            if(cycle%3===0){
+              for(const v of shareTokens)await tx(w,A,ft,'transfer',[v,100n*unit]);
+              // Change genuine rate conditions; subsequent pool interactions realize yield accounting.
+              await send(wallet,surge,surgeAbi,'setVolumeDisabled',[P2,cycle%2===0]);
+              await send(wallet,hook,hookAbi,'setVolumeDisabled',[P1,cycle%2!==0]);
+              await send(wallet,surge,surgeAbi,'setSurgeThresholdPercentage',[P2,unit/10n+BigInt(cycle)*unit/100n]);
+              await send(wallet,volume,vol,'setPoolVolumeFeeConfig',[P1,unit/100n,20+cycle,8]);
+            }
+            for(const p of fullPools){
+              const i=cycle%p.tokens.length,j=(i+1)%p.tokens.length,ti=p.tokens[i],to=p.tokens[j];
+              await singleSwap(w,p.address,ti,to,amount,0);
+              await singleSwap(w,p.address,to,ti,amount/2n,1);
+              await joinExit(w,p,unit+BigInt(cycle%4)*unit/4n);
+              if(cycle%4===0){
+                await sim(w,router,addRoute,'querySwapSingleTokenExactIn',[p.address,ti,to,unit,who,'0x']);
+                await sim(w,router,addRoute,'querySwapSingleTokenExactOut',[p.address,to,ti,unit/2n,who,'0x']);
+                await sim(w,router,addRoute,'queryAddLiquidityProportional',[p.address,unit/10n,who,'0x']);
+                await sim(w,router,addRoute,'queryRemoveLiquidityProportional',[p.address,unit/10n,who,'0x']);
+              }
+            }
+            for(const v of shareTokens)await vaultLifecycle(w,v,amount);
+            const path1=exactInPath(T,[step(P1,A),step(P3,Z),step(P6,B)],amount/2n);
+            const path2=exactOutPath(B,[step(P6,Z),step(P3,A),step(P1,T)],amount/3n);
+            const path3=exactInPath(F,[step(P2,A),step(P5,B),step(P7,T)],amount/3n);
+            const path4=exactOutPath(T,[step(P7,B),step(P5,A),step(P2,F)],amount/4n);
+            await tx(w,batch,batchAbi,'swapExactIn',[[path1],dl,false,'0x'],a=>{assert.equal(deltaOf(a,T,who),-path1.exactAmountIn);assert.ok(deltaOf(a,B,who)>0n);assert.equal(deltaOf(a,A,who),0n);assert.equal(deltaOf(a,Z,who),0n);});
+            await tx(w,batch,batchAbi,'swapExactOut',[[path2],dl,false,'0x'],a=>{assert.equal(deltaOf(a,T,who),path2.exactAmountOut);assert.ok(deltaOf(a,B,who)<0n);assert.equal(deltaOf(a,A,who),0n);assert.equal(deltaOf(a,Z,who),0n);});
+            await tx(w,batch,batchAbi,'swapExactIn',[[path3],dl,false,'0x'],a=>{assert.equal(deltaOf(a,F,who),-path3.exactAmountIn);assert.ok(deltaOf(a,T,who)>0n);assert.equal(deltaOf(a,A,who),0n);assert.equal(deltaOf(a,B,who),0n);});
+            await tx(w,batch,batchAbi,'swapExactOut',[[path4],dl,false,'0x'],a=>{assert.equal(deltaOf(a,F,who),path4.exactAmountOut);assert.ok(deltaOf(a,T,who)<0n);assert.equal(deltaOf(a,A,who),0n);assert.equal(deltaOf(a,B,who),0n);});
+            if(cycle%4===0){
+              await sim(w,batch,batchAbi,'querySwapExactIn',[[path1,path3],who,'0x']);
+              await sim(w,batch,batchAbi,'querySwapExactOut',[[path2,path4],who,'0x']);
+              await tx(w,batch,batchAbi,'swapExactIn',[[path1,path3],dl,false,'0x']);
+              await tx(w,batch,batchAbi,'swapExactOut',[[path2,path4],dl,false,'0x']);
+            }
+            const p=fullPools.find(p=>p.address===P0);
+            await tx(w,router,route,'donate',[P0,p.tokens.map(()=>unit),false,'0x']);
+            await tx(w,router,addRoute,'addLiquidityUnbalanced',[P0,[unit,unit/2n],1n,false,'0x']);
+            await tx(w,router,addRoute,'addLiquiditySingleTokenExactOut',[P0,A,100n*unit,unit/10n,false,'0x']);
+            await tx(w,router,addRoute,'removeLiquiditySingleTokenExactIn',[P0,unit/20n,A,1n,false,'0x']);
+            await tx(w,router,addRoute,'removeLiquiditySingleTokenExactOut',[P0,100n*unit,A,unit/20n,false,'0x']);
+            await tx(w,T,ft,'transfer',[w===wallet?actor2.address:account.address,unit],a=>{assert.equal(deltaOf(a,T,who),-unit);assert.equal(deltaOf(a,T,feeSink),unit*75n/10000n);});
+            // Collect and withdraw fees as independent post-configuration actions.
+            if(cycle%3===2){
+              for(const p0 of fullPools){
+                await tx(w,pc,pcAbi,'collectAggregateFees',[p0.address]);
+                await read(pc,pcAbi,'getProtocolFeeAmounts',[p0.address]);
+                await read(pc,pcAbi,'getPoolCreatorFeeAmounts',[p0.address]);
+                await tx(wallet,pc,pcAbi,'withdrawPoolCreatorFees',[p0.address,account.address]);
+                await tx(daoWallet,pc,pcAbi,'withdrawProtocolFees',[p0.address,dao]);
+              }
+            }
+            await read(P5,rcAbi,'computeCurrentPriceRange');
+            await read(P5,rcAbi,'computeCurrentVirtualBalances');
+            await read(P5,rcAbi,'computeCurrentPoolCenteredness');
+            for(const p0 of [P1,P2,P3,P6]){
+              await tx(w,infra,iabi,'observe',[p0]); // checkpoint accounting, excluded below from minimum count
+              actionCount--;
+              await read(infra,iabi,'isObservationWarm',[p0]);
+            }
+          }
+          assert.ok(actionCount>=500,'Fewer than 500 qualifying non-configuration functional transactions');
+          record(campaignLedger,{kind:'summary',actionCount,fixtureDeployments,fullPools,coverageStatus:'functional expansion; complete selector coverage separately measured'});
+          console.log('Expanded functional campaign completed: '+actionCount+' qualifying actions across '+fullPools.length+' added pools.');
+          
           await pub.request({method:'anvil_stopImpersonatingAccount',params:[dao]});
-          const evidence={chainId:8453,block:process.env.PINNED_BLOCK,blockHash:process.env.PINNED_HASH,sourceWorkspaceSha256:process.env.V21_WORKSPACE_SHA256,deployments:Object.keys(r.deployments),holder,dao,scenarios,receipts};
+          const evidence={fullCampaignV1:{actionCount,fixtureDeployments,fullPools,coverageStatus:'functional expansion; exact exhaustive selector coverage not established'},chainId:8453,block:process.env.PINNED_BLOCK,blockHash:process.env.PINNED_HASH,sourceWorkspaceSha256:process.env.V21_WORKSPACE_SHA256,deployments:Object.keys(r.deployments),holder,dao,scenarios,receipts};
           fs.writeFileSync(process.env.GITHUB_WORKSPACE+'/.source-zip-smoke/fork-evidence.json',JSON.stringify(evidence,(_,v)=>typeof v==='bigint'?v.toString():v,2)+'\n');
           console.log('V21 isolated Base fork qualification passed: 18 deployments, matched measured MEV runtime, two modes, native fee/cap/exemptions, maximum multiplication overflow, static floor, extreme threshold, zero combined cap, zero-surcharge activity/cache, and liquidity/swap callbacks.');
           JS
@@ -705,7 +1009,7 @@ jobs:
           set -euo pipefail
           mkdir -p .source-zip-smoke
           python3 - <<'PY'
-          import os, json, pathlib, base64
+          import os, json, pathlib, base64, gzip, hashlib
           d=pathlib.Path(".source-zip-smoke")
           project=pathlib.Path(os.environ["PROJECT_DIR"]) if os.environ.get("PROJECT_DIR") else None
           reports=sorted((project/"deployment-artifacts").glob("curveyield-dex-fresh-*.json")) if project else []
@@ -713,12 +1017,17 @@ jobs:
               p=d/name
               return p.read_text(errors="replace")[-150000:] if p.exists() else None
           result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],v16DeltaBlob=os.environ["V16_DELTA_BLOB"],v16DeltaSha256=os.environ["V16_DELTA_SHA256"],v16WorkspaceSha256=os.environ["V16_WORKSPACE_SHA256"],originalV16ArchiveSha256=os.environ["ORIGINAL_V16_ARCHIVE_SHA256"],v17DeltaBlob=os.environ["V17_DELTA_BLOB"],v17DeltaSha256=os.environ["V17_DELTA_SHA256"],v17WorkspaceSha256=os.environ["V17_WORKSPACE_SHA256"],originalV17ArchiveSha256=os.environ["ORIGINAL_V17_ARCHIVE_SHA256"],v18DeltaBlob=os.environ["V18_DELTA_BLOB"],v18DeltaSha256=os.environ["V18_DELTA_SHA256"],v18WorkspaceSha256=os.environ["V18_WORKSPACE_SHA256"],originalV18ArchiveSha256=os.environ["ORIGINAL_V18_ARCHIVE_SHA256"],v19DeltaBlob=os.environ["V19_DELTA_BLOB"],v19DeltaSha256=os.environ["V19_DELTA_SHA256"],v19WorkspaceSha256=os.environ["V19_WORKSPACE_SHA256"],originalV19ArchiveSha256=os.environ["ORIGINAL_V19_ARCHIVE_SHA256"],v20DeltaBlob=os.environ["V20_DELTA_BLOB"],v20DeltaSha256=os.environ["V20_DELTA_SHA256"],v20WorkspaceSha256=os.environ["V20_WORKSPACE_SHA256"],originalV20ArchiveSha256=os.environ["ORIGINAL_V20_ARCHIVE_SHA256"],v21DeltaBlob=os.environ["V21_DELTA_BLOB"],v21DeltaSha256=os.environ["V21_DELTA_SHA256"],v21WorkspaceSha256=os.environ["V21_WORKSPACE_SHA256"],originalV21ArchiveSha256=os.environ["ORIGINAL_V21_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),forkLog=log("fork.log"),rpcPacingLog=log("rpc-pacing.log"),anvilLog=log("anvil.log"),forkEvidence=json.loads((d/"fork-evidence.json").read_text()) if (d/"fork-evidence.json").exists() else None,buildReport=json.loads(reports[-1].read_text()) if reports else None)
+          for name in ["action-ledger.ndjson", "selector-ledger.ndjson"]:
+              p=d/name
+              if p.exists():
+                  raw=p.read_bytes()
+                  result[name]={"encoding":"gzip+base64","sha256":hashlib.sha256(raw).hexdigest(),"lines":len(raw.splitlines()),"data":base64.b64encode(gzip.compress(raw,compresslevel=6)).decode()}
           (d/"compile-evidence.json").write_text(json.dumps(result,indent=2)+"\n")
           PY
-          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v21_fork_evidence_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.json"
+          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v21_full_fork_evidence_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.json"
           ref="development/dex-simplified-native-fees-v1"
           old="$(gh api "repos/curveyield3/Audit-Controller/contents/$target?ref=$ref" --jq .sha 2>/dev/null || true)"
           base64 -w0 .source-zip-smoke/compile-evidence.json > .source-zip-smoke/evidence.b64
-          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v21 exact workspace fork evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
+          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v21 expanded fork evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
           gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$target" --input .source-zip-smoke/upload.json --silent
           echo "Private evidence recorded. Source: $SOURCE_STATUS; install: $INSTALL_STATUS; compile: $COMPILE_STATUS"
