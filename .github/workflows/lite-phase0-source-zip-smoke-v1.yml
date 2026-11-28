@@ -1,6 +1,6 @@
 name: Lite Phase 0 Archived Source ZIP Smoke v1
 
-# Isolated compile-only adaptation for the verified private DEX v21 workspace.
+# Isolated V21 Base fork deployment and functional accounting qualification.
 # The main-branch workflow remains unchanged.
 on:
   push:
@@ -369,12 +369,15 @@ jobs:
           test -n "${RPC_BASE:-}" || { echo "::error::RPC_BASE unavailable; cannot run authenticated Base fork"; exit 1; }
           export BASE_RPC_URL=http://127.0.0.1:8545
           test "$(cast chain-id --rpc-url "$RPC_BASE")" = 8453
-          export PINNED_BLOCK="$(cast block-number --rpc-url "$RPC_BASE")"
+          # Fetch block number and hash together; subsequent verification uses local Anvil.
+          PINNED_HEADER="$(cast rpc eth_getBlockByNumber latest false --rpc-url "$RPC_BASE")"
+          export PINNED_BLOCK="$(node -e 'const b=JSON.parse(process.argv[1]);if(!/^0x[0-9a-fA-F]+$/.test(b?.number||""))throw new Error("Missing authoritative block number");process.stdout.write(BigInt(b.number).toString())' "$PINNED_HEADER")"
+          export PINNED_HASH="$(jq -er '.hash | select(type=="string" and test("^0x[0-9a-fA-F]{64}$")) | ascii_downcase' <<< "$PINNED_HEADER")"
           block_hash() {
             RPC_CHECK_URL="$1" node --input-type=module -e 'const r=await fetch(process.env.RPC_CHECK_URL,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_getBlockByNumber",params:["0x"+BigInt(process.env.PINNED_BLOCK).toString(16),false]})}); if(!r.ok)throw new Error("Block RPC HTTP failure"); const j=await r.json(); const hash=j.result?.hash; if(!/^0x[0-9a-fA-F]{64}$/.test(hash||""))throw new Error("Missing authoritative block hash");process.stdout.write(hash.toLowerCase());'
           }
-          export PINNED_HASH="$(block_hash "$RPC_BASE")"
-          anvil --fork-url "$RPC_BASE" --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --compute-units-per-second 30 --retries 8 --fork-retry-backoff 2000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
+
+          anvil --fork-url "$RPC_BASE" --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --accounts 0 --compute-units-per-second 30 --retries 8 --fork-retry-backoff 2000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
           anvil_pid=$!
           trap 'kill "$anvil_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
@@ -400,7 +403,8 @@ jobs:
           const url='http://127.0.0.1:8545';
           assert.equal(process.env.BASE_RPC_URL,url);
           const chain=defineChain({id:8453,name:'Isolated Base fork',nativeCurrency:{name:'Ether',symbol:'ETH',decimals:18},rpcUrls:{default:{http:[url]}}});
-          const transport=http(url);
+          // Anvil owns upstream retries; the local client must allow cold state reads to finish.
+          const transport=http(url,{timeout:120_000,retryCount:0});
           const pub=createPublicClient({chain,transport});
           assert.equal(await pub.getChainId(),8453);
           assert.equal((await pub.getBlock({blockNumber:BigInt(process.env.PINNED_BLOCK)})).hash,process.env.PINNED_HASH);
