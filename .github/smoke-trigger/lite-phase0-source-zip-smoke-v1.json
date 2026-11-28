@@ -1,8 +1,9 @@
 {
   "schemaVersion": "curveyield-phase0-source-zip-smoke-trigger-v1",
   "mode": "SOURCE_ONLY_BUILD_SMOKE",
-  "controllerRef": "06f915dbcfef77db47ba56e560737520192437b0",
-  "archive": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v5.zip",
-  "sourceSha256": "6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177",
-  "triggerNonce": "dex-v5-restore-production-profile-pinned-oz540"
+  "controllerRef": "08feaf63b330e171d8d4edc9e7339fd434c7ed24",
+  "baseArchive": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v5.zip",
+  "workspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v11_workspace_delta_v1.zlib",
+  "workspaceSha256": "f17e17ea13dfccda2ab9a3acb42513f6f7fdca056201defd83ba6bdc2da62dc8",
+  "triggerNonce": "dex-v11-full-compile-verified-workspace-v1"
 }
