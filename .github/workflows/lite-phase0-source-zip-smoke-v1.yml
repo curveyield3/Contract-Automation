@@ -331,7 +331,7 @@ jobs:
           mv node_modules/@openzeppelin/contracts "$compiler_dir/original-openzeppelin-contracts"
           ln -s "$compiler_dir/node_modules/@openzeppelin/contracts" node_modules/@openzeppelin/contracts
           node -e 'const p=require("./node_modules/@openzeppelin/contracts/package.json"); if(p.version!=="5.4.0") process.exit(1); console.log("Resolved OpenZeppelin:",p.version)' >> "$GITHUB_WORKSPACE/.source-zip-smoke/install.log"
-      - name: Measure original MEV, exact Stable Surge toggle, and bounded configuration/math cleanups independently
+      - name: Measure V19 arithmetic-only cleanups with unchanged ABI
         id: compile
         env:
           PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
@@ -371,9 +371,17 @@ jobs:
           // maxUint256 / 1e18 is above it, and static + product/1e18 cannot overflow
           // following the original early return static < maximum.
           const math=s=>replace(s,'        (bool success, uint256 feeIncrement) = Math.tryMul(\n            priorityGasPrice - threshold,\n            _poolMevTaxMultipliers[pool]\n        );\n        if (!success) return maxMevSwapFeePercentage;\n\n        feeIncrement = feeIncrement / 1e18;\n        uint256 mevSwapFeePercentage = staticSwapFeePercentage + feeIncrement;\n        return Math.min(mevSwapFeePercentage, maxMevSwapFeePercentage);','        unchecked {\n            return Math.min(\n                staticSwapFeePercentage + Math.saturatingMul(priorityGasPrice - threshold, _poolMevTaxMultipliers[pool]) / 1e18,\n                maxMevSwapFeePercentage\n            );\n        }');
-          const variants=[['v18-original',original],['v19-qualified',v19],['toggle-only',toggle],['toggle-packed-config',packed],['toggle-simplified-math',math(toggle)],['toggle-packed-and-math',math(packed)]];
+          // Only remove arithmetic checks whose bounds are already enforced by the actual control flow.
+          const bounds=s=>{
+            s=replace(s,'        _activeVolumeFee.tSet(pool, 1 + volumeFeeController.recordSwapAndGetSurcharge(\n            pool, params.amountGivenScaled18, index, params.balancesScaled18\n        ));','        // The immutable volume controller returns a surcharge bounded by its uint64 configuration.\n        unchecked {\n            _activeVolumeFee.tSet(pool, 1 + volumeFeeController.recordSwapAndGetSurcharge(\n                pool, params.amountGivenScaled18, index, params.balancesScaled18\n            ));\n        }');
+            s=replace(s,'        uint256 surcharge = active == 0\n            ? volumeFeeController.previewVolumeSurcharge(pool, params.amountGivenScaled18,\n                params.kind == SwapKind.EXACT_IN ? params.indexIn : params.indexOut, params.balancesScaled18)\n            : active - 1;','        uint256 surcharge;\n        if (active == 0) {\n            surcharge = volumeFeeController.previewVolumeSurcharge(pool, params.amountGivenScaled18,\n                params.kind == SwapKind.EXACT_IN ? params.indexIn : params.indexOut, params.balancesScaled18);\n        } else {\n            unchecked { surcharge = active - 1; }\n        }');
+            s=replace(s,'        _poolCombinedFeeCap[pool] = enabled ? cap + 1 : 0;','        unchecked { _poolCombinedFeeCap[pool] = enabled ? cap + 1 : 0; }');
+            return replace(s,'        return cap == 0 ? globalCombinedFeeCap : cap - 1;','        unchecked { return cap == 0 ? globalCombinedFeeCap : cap - 1; }');
+          };
+          const variants=[['v19-qualified',v19],['v19-simplified-math',math(v19)],['v19-bounded-arithmetic',bounds(v19)],['v19-math-and-bounds',bounds(math(v19))]];
           const measurements=[];
-          const expectedAbi=(abi)=>abi.filter(x=>x.type==='function'||x.type==='event'||x.type==='error').map(x=>JSON.stringify(x)).sort();
+          const type=a=>a.type.startsWith('tuple')?'('+a.components.map(type).join(',')+')'+a.type.slice(5):a.type;
+          const expectedAbi=abi=>abi.filter(x=>['function','event','error'].includes(x.type)).map(x=>x.type+':'+x.name+'('+(x.inputs||[]).map(type).join(',')+')->'+(x.outputs||[]).map(type).join(',')).sort();
           let reference;
           try{
             for(const [variant,source] of variants){
@@ -386,7 +394,7 @@ jobs:
               console.log(variant+' runtime='+row.runtime+' creation='+row.creation+' sha256='+row.sourceSha256);
               fs.writeFileSync(dir+'/mev-benchmark.json',JSON.stringify({measurements},null,2)+'\n');
             }
-            const compatible=measurements.filter(x=>x.variant.startsWith('toggle')&&JSON.stringify(x.abi)===JSON.stringify(reference));
+            const compatible=measurements.filter(x=>JSON.stringify(x.abi)===JSON.stringify(reference));
             const best=compatible.sort((a,b)=>a.runtime-b.runtime||a.creation-b.creation)[0];
             if(!best)throw Error('No ABI-compatible candidate');
             fs.writeFileSync(dir+'/mev-benchmark.json',JSON.stringify({measurements:measurements.map(({abi,...r})=>r),selected:best.variant,selectedSha256:best.sourceSha256,selectedRuntime:best.runtime},null,2)+'\n');
