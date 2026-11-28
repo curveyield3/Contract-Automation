@@ -1,11 +1,11 @@
 {
   "schemaVersion": "curveyield-phase0-source-zip-smoke-trigger-v1",
   "mode": "SOURCE_ONLY_BUILD_SMOKE",
-  "controllerRef": "d9d479e546e8dc30918c4c8de562bff54f944fa1",
+  "controllerRef": "2bd09be0f82dd02b5297affebe0b2352aa624257",
   "baseArchive": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v5.zip",
   "workspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v11_workspace_delta_v1.zlib",
   "workspaceSha256": "f17e17ea13dfccda2ab9a3acb42513f6f7fdca056201defd83ba6bdc2da62dc8",
-  "triggerNonce": "dex-v15-per-hop-transfer-fees-and-burn-compile-v1",
+  "triggerNonce": "dex-v16-pol-retirement-compile-v1",
   "v12WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v12_workspace_delta_v1.zlib",
   "v12WorkspaceSha256": "89c3fda46cdc19ee6495f03ced7c8614ee6a161799bec4572794a0016b40434b",
   "v13WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v13_workspace_delta_v1.zlib",
@@ -13,5 +13,7 @@
   "v14WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v14_workspace_delta_v1.zlib",
   "v14WorkspaceSha256": "cecf9bed5f5946a7ffdbe8280c9e6ebad920955b9a4959614415b11f022747d6",
   "v15WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v15_workspace_delta_v1.zlib",
-  "v15WorkspaceSha256": "085a943f101a63eedf597437774f41855b9902501da59e2628cf7dea75d0b413"
+  "v15WorkspaceSha256": "085a943f101a63eedf597437774f41855b9902501da59e2628cf7dea75d0b413",
+  "v16WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v16_workspace_delta_v1.zlib",
+  "v16WorkspaceSha256": "e336f0a82334b9c4cac5aee41c0be4b9a99bbfeb679c6fa2e66cdebb15def01e"
 }
