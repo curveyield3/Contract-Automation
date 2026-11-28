@@ -362,11 +362,11 @@ jobs:
         id: compile
         env:
           PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
-          RPC_BASE: ${{ secrets.RPC_BASE }}
+          RPC_BASE: ${{ secrets.RPC_BASE2 }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${RPC_BASE:-}" || { echo "::error::RPC_BASE unavailable; cannot run authenticated Base fork"; exit 1; }
+          test -n "${RPC_BASE:-}" || { echo "::error::RPC_BASE2 unavailable; cannot run authenticated Base fork"; exit 1; }
           # Identify only a recognized provider; never emit the URL, hostname, path, or key.
           node --input-type=module <<'RPC_PROVIDER'
           const h=new URL(process.env.RPC_BASE).hostname.toLowerCase();
@@ -1028,7 +1028,7 @@ jobs:
         if: ${{ always() }}
         env:
           GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          RPC_BASE: ${{ secrets.RPC_BASE }}
+          RPC_BASE: ${{ secrets.RPC_BASE2 }}
           PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
           SOURCE_STATUS: ${{ steps.source.outcome }}
           INSTALL_STATUS: ${{ steps.install.outcome }}
