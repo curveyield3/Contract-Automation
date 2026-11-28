@@ -961,6 +961,7 @@ jobs:
         if: ${{ always() }}
         env:
           GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          RPC_BASE: ${{ secrets.RPC_BASE }}
           PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
           SOURCE_STATUS: ${{ steps.source.outcome }}
           INSTALL_STATUS: ${{ steps.install.outcome }}
@@ -976,7 +977,11 @@ jobs:
           reports=sorted((project/"deployment-artifacts").glob("curveyield-dex-fresh-*.json")) if project else []
           def log(name):
               p=d/name
-              return p.read_text(errors="replace")[-150000:] if p.exists() else None
+              if not p.exists(): return None
+              value=p.read_text(errors="replace")
+              endpoint=os.environ.get("RPC_BASE","")
+              if endpoint: value=value.replace(endpoint,"[REDACTED_RPC_ENDPOINT]")
+              return value[-150000:]
           result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],v16DeltaBlob=os.environ["V16_DELTA_BLOB"],v16DeltaSha256=os.environ["V16_DELTA_SHA256"],v16WorkspaceSha256=os.environ["V16_WORKSPACE_SHA256"],originalV16ArchiveSha256=os.environ["ORIGINAL_V16_ARCHIVE_SHA256"],v17DeltaBlob=os.environ["V17_DELTA_BLOB"],v17DeltaSha256=os.environ["V17_DELTA_SHA256"],v17WorkspaceSha256=os.environ["V17_WORKSPACE_SHA256"],originalV17ArchiveSha256=os.environ["ORIGINAL_V17_ARCHIVE_SHA256"],v18DeltaBlob=os.environ["V18_DELTA_BLOB"],v18DeltaSha256=os.environ["V18_DELTA_SHA256"],v18WorkspaceSha256=os.environ["V18_WORKSPACE_SHA256"],originalV18ArchiveSha256=os.environ["ORIGINAL_V18_ARCHIVE_SHA256"],v19DeltaBlob=os.environ["V19_DELTA_BLOB"],v19DeltaSha256=os.environ["V19_DELTA_SHA256"],v19WorkspaceSha256=os.environ["V19_WORKSPACE_SHA256"],originalV19ArchiveSha256=os.environ["ORIGINAL_V19_ARCHIVE_SHA256"],v20DeltaBlob=os.environ["V20_DELTA_BLOB"],v20DeltaSha256=os.environ["V20_DELTA_SHA256"],v20WorkspaceSha256=os.environ["V20_WORKSPACE_SHA256"],originalV20ArchiveSha256=os.environ["ORIGINAL_V20_ARCHIVE_SHA256"],v21DeltaBlob=os.environ["V21_DELTA_BLOB"],v21DeltaSha256=os.environ["V21_DELTA_SHA256"],v21WorkspaceSha256=os.environ["V21_WORKSPACE_SHA256"],originalV21ArchiveSha256=os.environ["ORIGINAL_V21_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),forkLog=log("fork.log"),anvilLog=log("anvil.log"),forkEvidence=json.loads((d/"fork-evidence.json").read_text()) if (d/"fork-evidence.json").exists() else None,buildReport=json.loads(reports[-1].read_text()) if reports else None)
           for name in ["action-ledger.ndjson", "selector-ledger.ndjson"]:
               p=d/name
