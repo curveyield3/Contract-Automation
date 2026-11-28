@@ -1,6 +1,6 @@
 name: Lite Phase 0 Archived Source ZIP Smoke v1
 
-# Isolated compile-only adaptation for the verified private DEX v15 workspace.
+# Isolated compile-only adaptation for the verified private DEX v16 workspace.
 # The main-branch workflow remains unchanged.
 on:
   push:
@@ -23,7 +23,11 @@ jobs:
     env:
       SOURCE_BLOB: 17bc0b4eeb2dfa74bca525e2a173f9deafdea5e6
       SOURCE_SHA256: 6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177
-      SOURCE_COMMIT: d9d479e546e8dc30918c4c8de562bff54f944fa1
+      SOURCE_COMMIT: 2bd09be0f82dd02b5297affebe0b2352aa624257
+      V16_DELTA_BLOB: d03a748f5f62a23d5dc69e2b16a7cf96dc40b8dd
+      V16_DELTA_SHA256: 6b93183ef8ec127506e48a066670cae5ca4ce645767fbd2af6731912b0096a7f
+      V16_WORKSPACE_SHA256: e336f0a82334b9c4cac5aee41c0be4b9a99bbfeb679c6fa2e66cdebb15def01e
+      ORIGINAL_V16_ARCHIVE_SHA256: 42512c3a5527e2d1c9b631926af4cd37d4c0fffea7bc893dfd409bd050be2bc3
       V15_DELTA_BLOB: 8eb3ea0426e9df5ac7db7be5f0d3baa21e5ab990
       V15_DELTA_SHA256: ea9a62b9b1ee0626d6c473e1bfe568efa2679bf0cfaf3a64b5afe5ccfa188812
       V15_WORKSPACE_SHA256: 085a943f101a63eedf597437774f41855b9902501da59e2628cf7dea75d0b413
@@ -74,6 +78,8 @@ jobs:
           echo "$V14_DELTA_SHA256  .source-zip-smoke/workspace-v14.delta" | sha256sum -c
           gh api "repos/curveyield3/Audit-Controller/git/blobs/$V15_DELTA_BLOB" --jq .content | base64 --decode > .source-zip-smoke/workspace-v15.delta
           echo "$V15_DELTA_SHA256  .source-zip-smoke/workspace-v15.delta" | sha256sum -c
+          gh api "repos/curveyield3/Audit-Controller/git/blobs/$V16_DELTA_BLOB" --jq .content | base64 --decode > .source-zip-smoke/workspace-v16.delta
+          echo "$V16_DELTA_SHA256  .source-zip-smoke/workspace-v16.delta" | sha256sum -c
           python3 - <<'PY'
           import os, pathlib, zipfile, zlib, json, hashlib
           dest = pathlib.Path(".source-project")
@@ -179,6 +185,25 @@ jobs:
           digest = hashlib.sha256(manifest.encode()).hexdigest()
           assert digest == os.environ["V15_WORKSPACE_SHA256"], digest
           print("Exact V15 workspace verified:", len(files), "files; SHA256", digest)
+          delta = json.loads(zlib.decompress(pathlib.Path(".source-zip-smoke/workspace-v16.delta").read_bytes()))
+          for name, ops in delta.items():
+              p = pathlib.PurePosixPath(name)
+              assert p.parts[0] == "workspace" and not p.is_absolute() and ".." not in p.parts
+              target = root.joinpath(*p.parts)
+              if ops is None:
+                  target.unlink()
+                  continue
+              lines = target.read_bytes().decode().splitlines(True) if target.exists() else []
+              for i,j,s in reversed(ops):
+                  lines[i:j] = s.splitlines(True)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes("".join(lines).encode())
+          files = sorted(p for p in (root / "workspace").rglob("*") if p.is_file())
+          manifest = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}\n" for p in files)
+          assert len(files) == 312, len(files)
+          digest = hashlib.sha256(manifest.encode()).hexdigest()
+          assert digest == os.environ["V16_WORKSPACE_SHA256"], digest
+          print("Exact V16 workspace verified:", len(files), "files; SHA256", digest)
           project = root / "workspace" / "contracts-repo" / "CurveYield DEX"
           assert (project / "package-lock.json").is_file()
           assert (project / "tooling/scripts/deployCurveYieldDexFresh.mjs").is_file()
@@ -234,13 +259,13 @@ jobs:
           def log(name):
               p=d/name
               return p.read_text(errors="replace")[-150000:] if p.exists() else None
-          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),buildReport=json.loads(reports[-1].read_text()) if reports else None)
+          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],v16DeltaBlob=os.environ["V16_DELTA_BLOB"],v16DeltaSha256=os.environ["V16_DELTA_SHA256"],v16WorkspaceSha256=os.environ["V16_WORKSPACE_SHA256"],originalV16ArchiveSha256=os.environ["ORIGINAL_V16_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),buildReport=json.loads(reports[-1].read_text()) if reports else None)
           (d/"compile-evidence.json").write_text(json.dumps(result,indent=2)+"\n")
           PY
-          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v15_compile_evidence_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.json"
+          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v16_compile_evidence_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.json"
           ref="development/dex-simplified-native-fees-v1"
           old="$(gh api "repos/curveyield3/Audit-Controller/contents/$target?ref=$ref" --jq .sha 2>/dev/null || true)"
           base64 -w0 .source-zip-smoke/compile-evidence.json > .source-zip-smoke/evidence.b64
-          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v15 exact workspace compile evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
+          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v16 exact workspace compile evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
           gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$target" --input .source-zip-smoke/upload.json --silent
           echo "Private evidence recorded. Source: $SOURCE_STATUS; install: $INSTALL_STATUS; compile: $COMPILE_STATUS"
