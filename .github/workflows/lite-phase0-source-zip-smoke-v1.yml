@@ -523,6 +523,7 @@ jobs:
               const b=before.tokens[t],a=after.tokens[t];
               const total=x=>Object.values(x.balances).reduce((s,v)=>s+v,0n);
               assert.equal(total(a)-total(b),a.supply-b.supply,'Controlled token supply/balance reconciliation: '+t);
+              assert.equal(a.balances[vault.toLowerCase()],a.reserve,'Controlled token vault custody/reserve reconciliation: '+t);
             }
           }
           function deltaOf(action,t,a){const k=t.toLowerCase(),u=a.toLowerCase();return action.after.tokens[k].balances[u]-action.before.tokens[k].balances[u];}
@@ -541,7 +542,7 @@ jobs:
             lastAction={phase:fullCampaignV1?'full':'retained-scoped',qualifying,actor,address,functionName,args,hash,gasUsed:receipt.gasUsed,blockNumber:receipt.blockNumber,before,after,logs:receipt.logs.map(l=>({address:l.address,topics:l.topics,data:l.data}))};
             record(campaignLedger,lastAction);
             assertConservation(before,after);
-            if(qualifying){actionCount++;if(actionCount%25===0)console.log('Qualifying actions completed: '+actionCount);}
+            // Count only after the action-specific and fee/burn assertions succeed.
             receipts.push({functionName,hash,gasUsed:receipt.gasUsed.toString(),qualifying});
             record(coverageLedger,{kind:'transaction',address,functionName,hash,qualifying});
             return s.result;
@@ -841,6 +842,9 @@ jobs:
                 assert.equal(deltaOf(lastAction,t,dao),fee,'Fee recipient balance delta');
                 assert.equal(lastAction.after.tokens[t].supply-lastAction.before.tokens[t].supply,-burn,'Hook burn supply delta');
               }
+              actionCount++;
+              record(campaignLedger,{kind:'qualified',hash:lastAction.hash,actionNumber:actionCount});
+              if(actionCount%25===0)console.log('Qualifying actions completed: '+actionCount);
               return result;
             }finally{qualifying=false;}
           }
@@ -982,8 +986,7 @@ jobs:
             await read(P5,rcAbi,'computeCurrentVirtualBalances');
             await read(P5,rcAbi,'computeCurrentPoolCenteredness');
             for(const p0 of [P1,P2,P3,P6]){
-              await tx(w,infra,iabi,'observe',[p0]); // checkpoint accounting, excluded below from minimum count
-              actionCount--;
+              await send(w,infra,iabi,'observe',[p0]); // checkpoint read/re-accounting excluded from minimum count
               await read(infra,iabi,'isObservationWarm',[p0]);
             }
           }
