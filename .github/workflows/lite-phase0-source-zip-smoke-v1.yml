@@ -367,6 +367,13 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${RPC_BASE:-}" || { echo "::error::RPC_BASE unavailable; cannot run authenticated Base fork"; exit 1; }
+          # Identify only a recognized provider; never emit the URL, hostname, path, or key.
+          node --input-type=module <<'RPC_PROVIDER'
+          const h=new URL(process.env.RPC_BASE).hostname.toLowerCase();
+          const matches=d=>h===d||h.endsWith('.'+d);
+          const provider=matches('drpc.live')||matches('drpc.org')?'dRPC':matches('alchemy.com')||matches('alchemyapi.io')?'Alchemy':matches('infura.io')?'Infura':matches('quiknode.pro')?'QuickNode':matches('ankr.com')?'Ankr':matches('base.org')?'Base public RPC':matches('chainstack.com')||matches('chainstacklabs.com')?'Chainstack':matches('blockpi.network')?'BlockPI':'Unidentified/custom';
+          console.log('Upstream RPC provider: '+provider);
+          RPC_PROVIDER
           export BASE_RPC_URL=http://127.0.0.1:8545
           test "$(cast chain-id --rpc-url "$RPC_BASE")" = 8453
           # Fetch block number and hash together; subsequent verification uses local Anvil.
