@@ -1,11 +1,11 @@
 {
   "schemaVersion": "curveyield-phase0-source-zip-smoke-trigger-v1",
   "mode": "SOURCE_ONLY_BUILD_SMOKE",
-  "controllerRef": "0e6d9d61b79abdc760efbc488874b189e8d3a3a5",
+  "controllerRef": "578d120e3582f5d687b1deb8d3ae9c0e9fabc660",
   "baseArchive": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v5.zip",
   "workspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v11_workspace_delta_v1.zlib",
   "workspaceSha256": "f17e17ea13dfccda2ab9a3acb42513f6f7fdca056201defd83ba6bdc2da62dc8",
-  "triggerNonce": "dex-v19-mev-calldata-cleanup-volume-toggle-v1",
+  "triggerNonce": "dex-v20-internal-observation-query-library-v1",
   "v12WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v12_workspace_delta_v1.zlib",
   "v12WorkspaceSha256": "89c3fda46cdc19ee6495f03ced7c8614ee6a161799bec4572794a0016b40434b",
   "v13WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v13_workspace_delta_v1.zlib",
@@ -16,11 +16,13 @@
   "v15WorkspaceSha256": "085a943f101a63eedf597437774f41855b9902501da59e2628cf7dea75d0b413",
   "v16WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v16_workspace_delta_v1.zlib",
   "v16WorkspaceSha256": "e336f0a82334b9c4cac5aee41c0be4b9a99bbfeb679c6fa2e66cdebb15def01e",
-  "scope": "MEV-only vs MEV+volume, fee cap and exemption behavior, role and callback coverage",
+  "scope": "Internal query library; 18 deployments, runtime size, oracle warm-up/history/BPT/swap quote equivalence, genuine hook callbacks",
   "v17WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v17_workspace_delta_v1.zlib",
   "v17WorkspaceSha256": "21c9afae1681a6a0efda3a0ffdf7df6d1129f473ef9c10939c1f39bf14b5fa83",
   "v18WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v18_workspace_delta_v1.zlib",
   "v18WorkspaceSha256": "55f26df3fb631a80c20355712c52272bbbfe5c43db77436de5a64f8a6e36d9bf",
   "v19WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v19_workspace_delta_v1.zlib",
-  "v19WorkspaceSha256": "00ac71334b2547af3547d1108b05ccfd759e9898ad6a276916c57997aacfc7ba"
+  "v19WorkspaceSha256": "00ac71334b2547af3547d1108b05ccfd759e9898ad6a276916c57997aacfc7ba",
+  "v20WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v20_workspace_delta_v1.zlib",
+  "v20WorkspaceSha256": "953c80ac8b654e3d045f6533f0e6a2beb1d1237bea64627e756c7b14862fd3e3"
 }
