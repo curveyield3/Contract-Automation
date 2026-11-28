@@ -444,8 +444,8 @@ jobs:
           export DEPLOYER_ADDRESS="$(cast wallet address --private-key "$DEPLOYER_PRIVATE_KEY")"
           cast rpc anvil_setBalance "$DEPLOYER_ADDRESS" 0x3635c9adc5dea00000 --rpc-url "$BASE_RPC_URL" >/dev/null
           export MAX_FEE_PER_GAS_WEI="$(node -e 'const f=BigInt(process.argv[1]);process.stdout.write((f*3n+10000000n).toString())' "$(cast rpc eth_gasPrice --rpc-url "$BASE_RPC_URL" | jq -er 'select(type=="string" and test("^0x[0-9a-fA-F]+$"))')")"
-          npm run ops:deploy-curveyield-dex-fresh > "$GITHUB_WORKSPACE/.source-zip-smoke/compile.log" 2>&1
-          node --input-type=module > "$GITHUB_WORKSPACE/.source-zip-smoke/fork.log" 2>&1 <<'JS'
+          npm run ops:deploy-curveyield-dex-fresh 2>&1 | tee "$GITHUB_WORKSPACE/.source-zip-smoke/compile.log"
+          node --input-type=module 2>&1 <<'JS' | tee "$GITHUB_WORKSPACE/.source-zip-smoke/fork.log"
           import fs from 'node:fs';
           import assert from 'node:assert/strict';
           import {createPublicClient, createWalletClient, defineChain, http, parseAbi, toFunctionSelector, zeroAddress, maxUint256} from 'viem';
@@ -849,7 +849,7 @@ jobs:
             }finally{qualifying=false;}
           }
           async function sim(w,address,abi,functionName,args=[]){
-            const r0=await pub.simulateContract({account:w.account,address,abi,functionName,args});
+            const r0=await pub.simulateContract({account:functionName.startsWith('query')?zeroAddress:w.account,address,abi,functionName,args});
             record(coverageLedger,{kind:'simulation',address,functionName,args,result:r0.result});return r0.result;
           }
           const actorOf=w=>w.account.address;
