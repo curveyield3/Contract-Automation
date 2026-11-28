@@ -230,16 +230,143 @@ jobs:
           mv node_modules/@openzeppelin/contracts "$compiler_dir/original-openzeppelin-contracts"
           ln -s "$compiler_dir/node_modules/@openzeppelin/contracts" node_modules/@openzeppelin/contracts
           node -e 'const p=require("./node_modules/@openzeppelin/contracts/package.json"); if(p.version!=="5.4.0") process.exit(1); console.log("Resolved OpenZeppelin:",p.version)' >> "$GITHUB_WORKSPACE/.source-zip-smoke/install.log"
-      - name: Compile DEX with its existing deployment compiler
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile, deploy and qualify V16 native DAO fee wiring on an isolated Base fork
         id: compile
         env:
           PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
+          RPC_BASE: ${{ secrets.RPC_BASE }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${RPC_BASE:-}" || { echo "::error::RPC_BASE unavailable; cannot run authenticated Base fork"; exit 1; }
+          export BASE_RPC_URL=http://127.0.0.1:8545
+          test "$(cast chain-id --rpc-url "$RPC_BASE")" = 8453
+          export PINNED_BLOCK="$(cast block-number --rpc-url "$RPC_BASE")"
+          export PINNED_HASH="$(cast block "$PINNED_BLOCK" --rpc-url "$RPC_BASE" --json | jq -er .hash)"
+          anvil --fork-url "$RPC_BASE" --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
+          anvil_pid=$!
+          trap 'kill "$anvil_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if cast chain-id --rpc-url "$BASE_RPC_URL" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          test "$(cast chain-id --rpc-url "$BASE_RPC_URL")" = 8453
+          test "$(cast block "$PINNED_BLOCK" --rpc-url "$BASE_RPC_URL" --json | jq -er .hash)" = "$PINNED_HASH"
+          echo "Pinned Base fork block $PINNED_BLOCK hash $PINNED_HASH"
           cd "$PROJECT_DIR"
-          npm run ops:compile-curveyield-dex > "$GITHUB_WORKSPACE/.source-zip-smoke/compile.log" 2>&1
-      - name: Preserve private compile evidence
+          export DEPLOYER_PRIVATE_KEY="$(node -e 'process.stdout.write("0x"+require("node:crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::$DEPLOYER_PRIVATE_KEY"
+          export DEPLOYER_ADDRESS="$(cast wallet address --private-key "$DEPLOYER_PRIVATE_KEY")"
+          cast rpc anvil_setBalance "$DEPLOYER_ADDRESS" 0x3635c9adc5dea00000 --rpc-url "$BASE_RPC_URL" >/dev/null
+          export MAX_FEE_PER_GAS_WEI="$(node -e 'const f=BigInt(process.argv[1]);process.stdout.write((f*3n+10000000n).toString())' "$(cast block latest --rpc-url "$BASE_RPC_URL" --json | jq -er .baseFeePerGas)")"
+          npm run ops:deploy-curveyield-dex-fresh > "$GITHUB_WORKSPACE/.source-zip-smoke/compile.log" 2>&1
+          node --input-type=module > "$GITHUB_WORKSPACE/.source-zip-smoke/fork.log" 2>&1 <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import {createPublicClient, createWalletClient, defineChain, http, parseAbi, toFunctionSelector, zeroAddress, maxUint256} from 'viem';
+          import {privateKeyToAccount} from 'viem/accounts';
+          const url='http://127.0.0.1:8545';
+          assert.equal(process.env.BASE_RPC_URL,url);
+          const chain=defineChain({id:8453,name:'Isolated Base fork',nativeCurrency:{name:'Ether',symbol:'ETH',decimals:18},rpcUrls:{default:{http:[url]}}});
+          const transport=http(url);
+          const pub=createPublicClient({chain,transport});
+          assert.equal(await pub.getChainId(),8453);
+          assert.equal((await pub.getBlock({blockNumber:BigInt(process.env.PINNED_BLOCK)})).hash,process.env.PINNED_HASH);
+          const account=privateKeyToAccount(process.env.DEPLOYER_PRIVATE_KEY);
+          const wallet=createWalletClient({account,chain,transport});
+          const reports=fs.readdirSync('deployment-artifacts').filter(x=>x.startsWith('curveyield-dex-fresh-')).sort();
+          const r=JSON.parse(fs.readFileSync('deployment-artifacts/'+reports.at(-1),'utf8'));
+          assert.ok(r.completedAt && !r.error);
+          assert.equal(Object.keys(r.deployments).length,20);
+          assert.ok(!r.deployments.CurveYieldProtocolRevenue);
+          const addr=n=>r.deployments[n].address;
+          for(const d of Object.values(r.deployments)) assert.ok((await pub.getCode({address:d.address})).length>2);
+          const fees=addr('ProtocolFeeController'), auth=addr('TimelockAuthorizer'), dao=r.dao, router=addr('Router'), factory=addr('WeightedPoolFactory');
+          const fa=parseAbi(['function getActionId(bytes4) view returns (bytes32)','function getGlobalProtocolSwapFeePercentage() view returns (uint256)','function getGlobalProtocolYieldFeePercentage() view returns (uint256)','function collectAggregateFees(address)','function withdrawProtocolFees(address,address)','function getProtocolFeeAmounts(address) view returns (uint256[])','function getPoolCreatorFeeAmounts(address) view returns (uint256[])','function setPoolCreatorSwapFeePercentage(address,uint256)','function withdrawPoolCreatorFees(address)']);
+          const read=(address,abi,functionName,args=[])=>pub.readContract({address,abi,functionName,args});
+          const action=await read(fees,fa,'getActionId',[toFunctionSelector('withdrawProtocolFees(address,address)')]);
+          const aa=parseAbi(['function hasPermission(bytes32,address,address) view returns (bool)']);
+          assert.equal(await read(auth,aa,'hasPermission',[action,dao,fees]),true);
+          assert.equal(await read(auth,aa,'hasPermission',[action,account.address,fees]),false);
+          const reg=parseAbi(['function getBalancerContract(uint8,string) view returns (address,bool)']);
+          for(const name of ['curveyield-v1-protocol-revenue','ProtocolRevenue']) assert.deepEqual(await read(addr('BalancerContractRegistry'),reg,'getBalancerContract',[0,name]),[zeroAddress,false]);
+          assert.equal(await read(fees,fa,'getGlobalProtocolSwapFeePercentage'),80000000000000000n);
+          assert.equal(await read(fees,fa,'getGlobalProtocolYieldFeePercentage'),120000000000000000n);
+          const receipts=[];
+          async function send(w,address,abi,functionName,args=[],value=0n) {
+            const s=await pub.simulateContract({account:w.account,address,abi,functionName,args,value});
+            const hash=await w.writeContract(s.request);
+            const receipt=await pub.waitForTransactionReceipt({hash});
+            assert.equal(receipt.status,'success');
+            receipts.push({functionName,hash,gasUsed:receipt.gasUsed.toString()});
+            return s.result;
+          }
+          async function impersonate(address) {
+            await pub.request({method:'anvil_impersonateAccount',params:[address]});
+            await pub.request({method:'anvil_setBalance',params:[address,'0x56bc75e2d63100000']});
+            return createWalletClient({account:address,chain,transport});
+          }
+          // Actual fork assets: canonical WETH and native USDC; acquire test USDC
+          // from real fork pool balance only, via local impersonation.
+          const weth=r.weth, usdc='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+          const uni='0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
+          const token=parseAbi(['function balanceOf(address) view returns (uint256)','function approve(address,uint256) returns (bool)','function transfer(address,uint256) returns (bool)','function decimals() view returns (uint8)','function deposit() payable']);
+          assert.equal(await read(weth,token,'decimals'),18);
+          assert.equal(await read(usdc,token,'decimals'),6);
+          const uabi=parseAbi(['function getPool(address,address,uint24) view returns (address)']);
+          let holder;
+          for(const tier of [500,3000,100,10000]){
+            const p=await read(uni,uabi,'getPool',[weth,usdc,tier]);
+            if(p!==zeroAddress && await read(usdc,token,'balanceOf',[p])>=20000000000n){holder=p;break;}
+          }
+          assert.ok(holder,'No actual USDC pool with enough local fork fixture funds');
+          const holderWallet=await impersonate(holder);
+          await send(holderWallet,usdc,token,'transfer',[account.address,20000000000n]);
+          await pub.request({method:'anvil_stopImpersonatingAccount',params:[holder]});
+          await send(wallet,weth,token,'deposit',[],20n*10n**18n);
+          const permit=parseAbi(['function approve(address,address,uint160,uint48)']);
+          const expiry=Number((await pub.getBlock()).timestamp)+86400;
+          for(const t of [weth,usdc]){
+            await send(wallet,t,token,'approve',[r.permit2,maxUint256]);
+            await send(wallet,r.permit2,permit,'approve',[t,router,(1n<<160n)-1n,expiry]);
+          }
+          const create=parseAbi(['function create(string,string,(address token,uint8 tokenType,address rateProvider,bool paysYieldFees)[],uint256[],(address pauseManager,address swapFeeManager,address poolCreator),uint256,address,bool,bool,bytes32) returns (address)']);
+          const configs=[weth,usdc].map(token=>({token,tokenType:0,rateProvider:zeroAddress,paysYieldFees:false}));
+          const pool=await send(wallet,factory,create,'create',['V16 fee qualification','V16F',configs,[500000000000000000n,500000000000000000n],{pauseManager:zeroAddress,swapFeeManager:zeroAddress,poolCreator:account.address},10000000000000000n,zeroAddress,false,false,'0x'+'00'.repeat(31)+'01']);
+          assert.ok((await pub.getCode({address:pool})).length>2);
+          const route=parseAbi(['function initialize(address,address[],uint256[],uint256,bool,bytes) payable returns (uint256)','function swapSingleTokenExactIn(address,address,address,uint256,uint256,uint256,bool,bytes) payable returns (uint256)']);
+          await send(wallet,router,route,'initialize',[pool,[weth,usdc],[10n*10n**18n,10000000000n],0n,false,'0x']);
+          await send(wallet,fees,fa,'setPoolCreatorSwapFeePercentage',[pool,100000000000000000n]);
+          const daoWallet=await impersonate(dao);
+          const scenarios=[];
+          for(const [tIn,tOut,amount] of [[weth,usdc,100000000000000000n],[usdc,weth,500000000n]]){
+            const deadline=(await pub.getBlock()).timestamp+3600n;
+            await send(wallet,router,route,'swapSingleTokenExactIn',[pool,tIn,tOut,amount,0n,deadline,false,'0x']);
+            await send(wallet,fees,fa,'collectAggregateFees',[pool]);
+            const accrued=await read(fees,fa,'getProtocolFeeAmounts',[pool]);
+            const creatorBefore=await read(fees,fa,'getPoolCreatorFeeAmounts',[pool]);
+            assert.ok(accrued.some(x=>x>0n));
+            assert.ok(creatorBefore.some(x=>x>0n));
+            await assert.rejects(pub.simulateContract({account:account.address,address:fees,abi:fa,functionName:'withdrawProtocolFees',args:[pool,account.address]}));
+            const before=await Promise.all([weth,usdc].map(t=>read(t,token,'balanceOf',[dao])));
+            await send(daoWallet,fees,fa,'withdrawProtocolFees',[pool,dao]);
+            const after=await Promise.all([weth,usdc].map(t=>read(t,token,'balanceOf',[dao])));
+            assert.deepEqual(after.map((x,i)=>x-before[i]),accrued);
+            assert.deepEqual(await read(fees,fa,'getProtocolFeeAmounts',[pool]),[0n,0n]);
+            assert.deepEqual(await read(fees,fa,'getPoolCreatorFeeAmounts',[pool]),creatorBefore);
+            await send(wallet,fees,fa,'withdrawPoolCreatorFees',[pool]);
+            assert.deepEqual(await read(fees,fa,'getPoolCreatorFeeAmounts',[pool]),[0n,0n]);
+            scenarios.push({tokenIn:tIn,amount,accrued,creatorBefore,daoReceived:after.map((x,i)=>x-before[i]),unauthorizedWithdrawalRejected:true});
+          }
+          await pub.request({method:'anvil_stopImpersonatingAccount',params:[dao]});
+          const evidence={chainId:8453,block:process.env.PINNED_BLOCK,blockHash:process.env.PINNED_HASH,sourceWorkspaceSha256:process.env.V16_WORKSPACE_SHA256,deployments:Object.keys(r.deployments),pool,holder,dao,withdrawalPermission:true,legacyRevenueRegistryAbsent:true,scenarios,receipts};
+          fs.writeFileSync(process.env.GITHUB_WORKSPACE+'/.source-zip-smoke/fork-evidence.json',JSON.stringify(evidence,(_,v)=>typeof v==='bigint'?v.toString():v,2)+'\n');
+          console.log('V16 isolated Base fork qualification passed: 20 deployments, direct DAO withdrawal, two real token fee scenarios, unchanged creator fee accounting, no legacy revenue registration.');
+          JS
+      - name: Preserve private fork qualification evidence
         if: ${{ always() }}
         env:
           GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -259,13 +386,13 @@ jobs:
           def log(name):
               p=d/name
               return p.read_text(errors="replace")[-150000:] if p.exists() else None
-          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],v16DeltaBlob=os.environ["V16_DELTA_BLOB"],v16DeltaSha256=os.environ["V16_DELTA_SHA256"],v16WorkspaceSha256=os.environ["V16_WORKSPACE_SHA256"],originalV16ArchiveSha256=os.environ["ORIGINAL_V16_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),buildReport=json.loads(reports[-1].read_text()) if reports else None)
+          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],v16DeltaBlob=os.environ["V16_DELTA_BLOB"],v16DeltaSha256=os.environ["V16_DELTA_SHA256"],v16WorkspaceSha256=os.environ["V16_WORKSPACE_SHA256"],originalV16ArchiveSha256=os.environ["ORIGINAL_V16_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),forkLog=log("fork.log"),forkEvidence=json.loads((d/"fork-evidence.json").read_text()) if (d/"fork-evidence.json").exists() else None,buildReport=json.loads(reports[-1].read_text()) if reports else None)
           (d/"compile-evidence.json").write_text(json.dumps(result,indent=2)+"\n")
           PY
-          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v16_compile_evidence_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.json"
+          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v16_fork_evidence_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.json"
           ref="development/dex-simplified-native-fees-v1"
           old="$(gh api "repos/curveyield3/Audit-Controller/contents/$target?ref=$ref" --jq .sha 2>/dev/null || true)"
           base64 -w0 .source-zip-smoke/compile-evidence.json > .source-zip-smoke/evidence.b64
-          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v16 exact workspace compile evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
+          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v16 exact workspace fork evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
           gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$target" --input .source-zip-smoke/upload.json --silent
           echo "Private evidence recorded. Source: $SOURCE_STATUS; install: $INSTALL_STATUS; compile: $COMPILE_STATUS"
