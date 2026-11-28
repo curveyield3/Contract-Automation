@@ -5,7 +5,7 @@
   "baseArchive": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v5.zip",
   "workspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v11_workspace_delta_v1.zlib",
   "workspaceSha256": "f17e17ea13dfccda2ab9a3acb42513f6f7fdca056201defd83ba6bdc2da62dc8",
-  "triggerNonce": "dex-v17-stable-surge-optimization-fork-v2-paced-archive",
+  "triggerNonce": "dex-v17-stable-surge-optimization-fork-v3-paced-compatible-cli",
   "v12WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v12_workspace_delta_v1.zlib",
   "v12WorkspaceSha256": "89c3fda46cdc19ee6495f03ced7c8614ee6a161799bec4572794a0016b40434b",
   "v13WorkspaceDelta": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v13_workspace_delta_v1.zlib",
