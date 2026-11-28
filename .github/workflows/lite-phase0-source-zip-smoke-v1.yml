@@ -443,7 +443,7 @@ jobs:
           echo "::add-mask::$DEPLOYER_PRIVATE_KEY"
           export DEPLOYER_ADDRESS="$(cast wallet address --private-key "$DEPLOYER_PRIVATE_KEY")"
           cast rpc anvil_setBalance "$DEPLOYER_ADDRESS" 0x3635c9adc5dea00000 --rpc-url "$BASE_RPC_URL" >/dev/null
-          export MAX_FEE_PER_GAS_WEI="$(node -e 'const f=BigInt(process.argv[1]);process.stdout.write((f*3n+10000000n).toString())' "$(cast block latest --rpc-url "$BASE_RPC_URL" --json | jq -er .baseFeePerGas)")"
+          export MAX_FEE_PER_GAS_WEI="$(node -e 'const f=BigInt(process.argv[1]);process.stdout.write((f*3n+10000000n).toString())' "$(cast rpc eth_gasPrice --rpc-url "$BASE_RPC_URL" | jq -er 'select(type=="string" and test("^0x[0-9a-fA-F]+$"))')")"
           npm run ops:deploy-curveyield-dex-fresh > "$GITHUB_WORKSPACE/.source-zip-smoke/compile.log" 2>&1
           node --input-type=module > "$GITHUB_WORKSPACE/.source-zip-smoke/fork.log" 2>&1 <<'JS'
           import fs from 'node:fs';
