@@ -298,8 +298,12 @@ jobs:
                 if(attempt===4) return result?.error?result:{jsonrpc:'2.0',id:msg.id,error:{code:429,message:'Archive provider rate limit persists'}};
                 await sleep(delay); continue;
               }
-              if(!res.ok||!result)throw Error('Archive RPC HTTP '+res.status);
-              return result;
+              if(result && typeof result==='object' && ('result' in result || 'error' in result)){
+                if(result.error) console.log('Archive RPC method='+msg.method+' HTTP='+res.status+' error_code='+result.error.code);
+                return {...result,jsonrpc:'2.0',id:msg.id};
+              }
+              console.log('Archive invalid response method='+msg.method+' HTTP='+res.status);
+              return {jsonrpc:'2.0',id:msg.id,error:{code:-32000,message:'Archive RPC returned invalid JSON-RPC (HTTP '+res.status+')'}};
             }
           }
           http.createServer(async(req,res)=>{
@@ -323,11 +327,12 @@ jobs:
             sleep 1
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8546)" = 8453
-          anvil --fork-url http://127.0.0.1:8546 --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --compute-units-per-second 30 --retries 2 --fork-retry-backoff 10000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
+          anvil --fork-url http://127.0.0.1:8546 --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --accounts 0 --compute-units-per-second 30 --retries 2 --fork-retry-backoff 10000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
           anvil_pid=$!
           trap 'kill "$anvil_pid" "$pacing_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
             if cast chain-id --rpc-url "$BASE_RPC_URL" >/dev/null 2>&1; then break; fi
+            kill -0 "$anvil_pid" 2>/dev/null || { echo '::error::Anvil exited during fork startup'; cat "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log"; exit 1; }
             sleep 1
           done
           test "$(cast chain-id --rpc-url "$BASE_RPC_URL")" = 8453
