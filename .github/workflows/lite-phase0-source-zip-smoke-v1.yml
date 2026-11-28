@@ -19,7 +19,7 @@ concurrency:
 jobs:
   source-zip-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       SOURCE_BLOB: 17bc0b4eeb2dfa74bca525e2a173f9deafdea5e6
       SOURCE_SHA256: 6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177
@@ -274,9 +274,58 @@ jobs:
             RPC_CHECK_URL="$1" node --input-type=module -e 'const r=await fetch(process.env.RPC_CHECK_URL,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_getBlockByNumber",params:["0x"+BigInt(process.env.PINNED_BLOCK).toString(16),false]})}); if(!r.ok)throw new Error("Block RPC HTTP failure"); const j=await r.json(); const hash=j.result?.hash; if(!/^0x[0-9a-fA-F]{64}$/.test(hash||""))throw new Error("Missing authoritative block hash");process.stdout.write(hash.toLowerCase());'
           }
           export PINNED_HASH="$(block_hash "$RPC_BASE")"
-          anvil --fork-url "$RPC_BASE" --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --compute-units-per-second 30 --retries 8 --fork-retry-backoff 2000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
+          # Anvil CUPS controls reactive retries, not initial request pacing.
+          # Serialize archive reads through this job-local relay; never forward writes.
+          node --input-type=module > "$GITHUB_WORKSPACE/.source-zip-smoke/rpc-pacing.log" 2>&1 <<'RPC_PACING' &
+          import http from 'node:http';
+          import {setTimeout as sleep} from 'node:timers/promises';
+          const upstream=process.env.RPC_BASE;
+          let tail=Promise.resolve(), next=0, calls=0, limited=0;
+          const readOnly=/^(eth_get[A-Za-z]+|eth_chainId|eth_blockNumber|eth_call|eth_feeHistory|eth_gasPrice|eth_maxPriorityFeePerGas|net_version|web3_clientVersion|anvil_nodeInfo|anvil_metadata)$/;
+          async function forward(msg) {
+            if(!readOnly.test(msg.method||'')) return {jsonrpc:'2.0',id:msg.id,error:{code:-32601,message:'Read-only archive relay'}};
+            for(let attempt=0;attempt<5;attempt++){
+              await sleep(Math.max(0,next-Date.now())); next=Date.now()+1500; calls++;
+              const res=await fetch(upstream,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(msg),signal:AbortSignal.timeout(45000)});
+              const raw=await res.text(); let result;
+              try{result=JSON.parse(raw)}catch{}
+              if(res.status===429 || result?.error?.code===15 || result?.error?.code===429 || /rate limit/i.test(result?.error?.message||'')){
+                limited++;
+                const h=res.headers.get('retry-after');
+                const requested=h?(Number.isFinite(Number(h))?Number(h)*1000:Date.parse(h)-Date.now()):0;
+                const delay=Math.max(10000*2**attempt,Number.isFinite(requested)?requested:0);
+                console.log('Archive throttled; reads='+calls+' rate_limits='+limited+' retry_delay_ms='+delay);
+                if(attempt===4) return result?.error?result:{jsonrpc:'2.0',id:msg.id,error:{code:429,message:'Archive provider rate limit persists'}};
+                await sleep(delay); continue;
+              }
+              if(!res.ok||!result)throw Error('Archive RPC HTTP '+res.status);
+              return result;
+            }
+          }
+          http.createServer(async(req,res)=>{
+            try{
+              let raw='';for await(const c of req)raw+=c;
+              const msg=JSON.parse(raw);
+              const run=tail.then(async()=>{
+                if(!Array.isArray(msg))return forward(msg);
+                const out=[];for(const item of msg)out.push(await forward(item));return out;
+              });
+              tail=run.catch(()=>{});
+              const out=await run;res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(out));
+              if(calls%25===0)console.log('Archive reads='+calls+' rate_limits='+limited);
+            }catch(e){res.writeHead(502,{'content-type':'application/json'});res.end(JSON.stringify({jsonrpc:'2.0',id:null,error:{code:-32000,message:'Archive relay request failed'}}));console.log('Archive relay failure: '+e.name);}
+          }).listen(8546,'127.0.0.1',()=>console.log('Archive relay ready: one request every 1500ms'));
+          RPC_PACING
+          pacing_pid=$!
+          trap 'kill "$pacing_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if cast chain-id --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          test "$(cast chain-id --rpc-url http://127.0.0.1:8546)" = 8453
+          anvil --fork-url http://127.0.0.1:8546 --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --compute-units-per-second 30 --retries 2 --fork-retry-backoff 10000 --fork-request-timeout 180000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
           anvil_pid=$!
-          trap 'kill "$anvil_pid" 2>/dev/null || true' EXIT
+          trap 'kill "$anvil_pid" "$pacing_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
             if cast chain-id --rpc-url "$BASE_RPC_URL" >/dev/null 2>&1; then break; fi
             sleep 1
@@ -472,7 +521,7 @@ jobs:
           def log(name):
               p=d/name
               return p.read_text(errors="replace")[-150000:] if p.exists() else None
-          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],v16DeltaBlob=os.environ["V16_DELTA_BLOB"],v16DeltaSha256=os.environ["V16_DELTA_SHA256"],v16WorkspaceSha256=os.environ["V16_WORKSPACE_SHA256"],originalV16ArchiveSha256=os.environ["ORIGINAL_V16_ARCHIVE_SHA256"],v17DeltaBlob=os.environ["V17_DELTA_BLOB"],v17DeltaSha256=os.environ["V17_DELTA_SHA256"],v17WorkspaceSha256=os.environ["V17_WORKSPACE_SHA256"],originalV17ArchiveSha256=os.environ["ORIGINAL_V17_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),forkLog=log("fork.log"),forkEvidence=json.loads((d/"fork-evidence.json").read_text()) if (d/"fork-evidence.json").exists() else None,buildReport=json.loads(reports[-1].read_text()) if reports else None)
+          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],workspaceDeltaBlob=os.environ["WORKSPACE_DELTA_BLOB"],workspaceDeltaSha256=os.environ["WORKSPACE_DELTA_SHA256"],workspaceSha256=os.environ["WORKSPACE_SHA256"],originalV11ArchiveSha256=os.environ["ORIGINAL_V11_ARCHIVE_SHA256"],v12DeltaBlob=os.environ["V12_DELTA_BLOB"],v12DeltaSha256=os.environ["V12_DELTA_SHA256"],v12WorkspaceSha256=os.environ["V12_WORKSPACE_SHA256"],originalV12ArchiveSha256=os.environ["ORIGINAL_V12_ARCHIVE_SHA256"],v13DeltaBlob=os.environ["V13_DELTA_BLOB"],v13DeltaSha256=os.environ["V13_DELTA_SHA256"],v13WorkspaceSha256=os.environ["V13_WORKSPACE_SHA256"],originalV13ArchiveSha256=os.environ["ORIGINAL_V13_ARCHIVE_SHA256"],v14DeltaBlob=os.environ["V14_DELTA_BLOB"],v14DeltaSha256=os.environ["V14_DELTA_SHA256"],v14WorkspaceSha256=os.environ["V14_WORKSPACE_SHA256"],originalV14ArchiveSha256=os.environ["ORIGINAL_V14_ARCHIVE_SHA256"],v15DeltaBlob=os.environ["V15_DELTA_BLOB"],v15DeltaSha256=os.environ["V15_DELTA_SHA256"],v15WorkspaceSha256=os.environ["V15_WORKSPACE_SHA256"],originalV15ArchiveSha256=os.environ["ORIGINAL_V15_ARCHIVE_SHA256"],v16DeltaBlob=os.environ["V16_DELTA_BLOB"],v16DeltaSha256=os.environ["V16_DELTA_SHA256"],v16WorkspaceSha256=os.environ["V16_WORKSPACE_SHA256"],originalV16ArchiveSha256=os.environ["ORIGINAL_V16_ARCHIVE_SHA256"],v17DeltaBlob=os.environ["V17_DELTA_BLOB"],v17DeltaSha256=os.environ["V17_DELTA_SHA256"],v17WorkspaceSha256=os.environ["V17_WORKSPACE_SHA256"],originalV17ArchiveSha256=os.environ["ORIGINAL_V17_ARCHIVE_SHA256"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),forkLog=log("fork.log"),rpcPacingLog=log("rpc-pacing.log"),anvilLog=log("anvil.log"),forkEvidence=json.loads((d/"fork-evidence.json").read_text()) if (d/"fork-evidence.json").exists() else None,buildReport=json.loads(reports[-1].read_text()) if reports else None)
           (d/"compile-evidence.json").write_text(json.dumps(result,indent=2)+"\n")
           PY
           target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v17_fork_evidence_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.json"
